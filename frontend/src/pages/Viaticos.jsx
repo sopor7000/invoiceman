@@ -1,16 +1,20 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { api } from '../api/client';
+import { api, descargar } from '../api/client';
+import DisclaimerModal from '../components/DisclaimerModal';
 import Spinner from '../components/Spinner';
 import { cop } from '../utils';
 
 export default function Viaticos() {
   const [conceptos, setConceptos] = useState(null);
   const [tope, setTope] = useState(null);
+  const [disclaimer, setDisclaimer] = useState('');
   const [valores, setValores] = useState({});
   const [obs, setObs] = useState('');
   const [error, setError] = useState('');
   const [ok, setOk] = useState(null);
+  const [modal, setModal] = useState(null); // null | 'confirmar' | 'listo'
+  const [errModal, setErrModal] = useState('');
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
@@ -18,6 +22,7 @@ export default function Viaticos() {
       .then(([c, s]) => {
         setConceptos(c.concepts);
         setTope(s.topeViaticos);
+        setDisclaimer(s.disclaimerViaticos);
       })
       .catch((e) => {
         setConceptos([]);
@@ -39,25 +44,56 @@ export default function Viaticos() {
   const excedeTotal = tope != null && total > tope;
   const hayExceso = lineas.some((l) => l.excede) || excedeTotal;
 
-  const enviar = async (e) => {
+  // Al pulsar "Enviar solicitud" solo se abre la ventana de confirmación
+  const pedirConfirmacion = (e) => {
     e.preventDefault();
     setError('');
+    setErrModal('');
+    setModal('confirmar');
+  };
+
+  const aceptar = async () => {
+    setErrModal('');
     setBusy(true);
     try {
       const r = await api('/viaticos', {
         method: 'POST',
         body: {
           observacion: obs.trim() || undefined,
+          disclaimerTexto: disclaimer,
           items: usadas.map((l) => ({ conceptId: l.id, valor: l.valor })),
         },
       });
       setOk(r.solicitud);
+      setModal('listo');
     } catch (err) {
-      setError(err.message);
+      setErrModal(err.message);
+      if (err.code === 'DISCLAIMER_CAMBIO') {
+        api('/settings').then((s) => setDisclaimer(s.disclaimerViaticos)).catch(() => {});
+      }
     } finally {
       setBusy(false);
     }
   };
+
+  const bajarPdf = () =>
+    descargar(`/viaticos/${ok.id}/pdf`, `confirmacion_viaticos_${ok.id.slice(0, 8)}.pdf`).catch((e) =>
+      setErrModal(e.message)
+    );
+
+  const ventana = modal && (
+    <DisclaimerModal
+      etapa={modal}
+      texto={disclaimer}
+      total={modal === 'listo' ? ok.total : total}
+      busy={busy}
+      error={errModal}
+      onAceptar={aceptar}
+      onCancelar={() => setModal(null)}
+      onDescargar={bajarPdf}
+      onCerrar={() => setModal(null)}
+    />
+  );
 
   if (ok) {
     return (
@@ -66,12 +102,15 @@ export default function Viaticos() {
           <p className="alert-title">Solicitud enviada</p>
           <p>Tu solicitud de viáticos por {cop(ok.total)} quedó pendiente de aprobación.</p>
         </div>
-        <div className="flex gap-3">
+        <div className="flex flex-wrap gap-3">
+          <button className="btn-red" onClick={bajarPdf}>Descargar PDF de confirmación</button>
           <Link to="/mis-solicitudes" className="btn-primary">Ver mis solicitudes</Link>
           <button className="btn-secondary" onClick={() => { setOk(null); setValores({}); setObs(''); }}>
             Crear otra
           </button>
         </div>
+        {errModal && <div role="alert" className="alert-error"><p>{errModal}</p></div>}
+        {ventana}
       </div>
     );
   }
@@ -83,7 +122,7 @@ export default function Viaticos() {
       <h1 className="page-title">Solicitar viáticos</h1>
       <p className="page-lead">Indica un valor para cada concepto que necesites. Deja en blanco los que no uses.</p>
 
-      <form onSubmit={enviar} className="card space-y-5">
+      <form onSubmit={pedirConfirmacion} className="card space-y-5">
         {error && <div role="alert" className="alert-error"><p>{error}</p></div>}
 
         {tope != null && (
@@ -112,7 +151,7 @@ export default function Viaticos() {
                 />
                 {l.topeValor != null && (
                   <span className={`hint ${l.excede ? 'font-semibold text-danger' : ''}`}>
-                    {l.excede ? `Supera el tope de este concepto: ` : 'Tope de este concepto: '}
+                    {l.excede ? 'Supera el tope de este concepto: ' : 'Tope de este concepto: '}
                     {cop(l.topeValor)}
                   </span>
                 )}
@@ -137,12 +176,12 @@ export default function Viaticos() {
         )}
 
         <div className="flex gap-3">
-          <button disabled={busy || usadas.length === 0 || hayExceso} className="btn-primary">
-            {busy ? 'Enviando…' : 'Enviar solicitud'}
-          </button>
+          <button disabled={usadas.length === 0 || hayExceso} className="btn-primary">Enviar solicitud</button>
           <Link to="/" className="btn-secondary">Cancelar</Link>
         </div>
       </form>
+
+      {ventana}
     </div>
   );
 }

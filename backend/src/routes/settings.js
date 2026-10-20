@@ -5,6 +5,7 @@ const supabase = require('../utils/supabase');
 const audit = require('../utils/audit');
 const { parse } = require('../utils/validate');
 const { limpiarHtml } = require('../utils/html');
+const { obtenerDisclaimer } = require('../utils/disclaimer');
 const { HttpError, asyncHandler } = require('../utils/errors');
 const { requireAuth, requireTenant, requireAdmin } = require('../middleware/auth');
 
@@ -12,10 +13,9 @@ const router = express.Router();
 router.use(requireAuth(), requireTenant);
 
 const TITULO_POR_DEFECTO = 'Políticas e instrucciones de uso';
-const MAX_HTML_LIMPIO = 100000; // caracteres
+const MAX_HTML_LIMPIO = 100000;
 
 const topeSchema = z.object({
-  // null = sin tope
   topeViaticos: z.union([
     z.null(),
     z
@@ -31,6 +31,15 @@ const infoSchema = z.object({
   contenidoHtml: z.string().max(300000, 'El contenido es demasiado extenso'),
 });
 
+// Texto vacío = restaurar el modelo por defecto
+const disclaimerSchema = z.object({
+  texto: z
+    .string()
+    .trim()
+    .max(5000, 'El texto no puede superar 5.000 caracteres')
+    .refine((t) => t === '' || t.length >= 20, 'El texto es muy corto (mínimo 20 caracteres)'),
+});
+
 async function leer(tenantId) {
   const { data, error } = await supabase
     .from('tenant_settings')
@@ -39,6 +48,8 @@ async function leer(tenantId) {
     .maybeSingle();
   if (error) throw error;
 
+  const disclaimer = await obtenerDisclaimer(tenantId);
+
   return {
     topeViaticos: data?.tope_viaticos == null ? null : Number(data.tope_viaticos),
     info: {
@@ -46,11 +57,12 @@ async function leer(tenantId) {
       contenidoHtml: data?.info_html ?? '',
       actualizadoEn: data?.info_actualizado_en ?? null,
     },
+    disclaimerViaticos: disclaimer.texto,
+    disclaimerPersonalizado: disclaimer.personalizado,
   };
 }
 
-// ---------- GET /api/settings ----------
-// Cualquier usuario: el home muestra la información y el formulario de viáticos muestra el tope
+// GET /api/settings
 router.get(
   '/',
   asyncHandler(async (req, res) => {
@@ -58,7 +70,7 @@ router.get(
   })
 );
 
-// ---------- PATCH /api/settings/viaticos ----------   { "topeViaticos": 500000 | null }
+// PATCH /api/settings/viaticos   { "topeViaticos": 500000 | null }
 router.patch(
   '/viaticos',
   requireAdmin,
@@ -82,7 +94,7 @@ router.patch(
   })
 );
 
-// ---------- PUT /api/settings/info ----------   { "titulo": "...", "contenidoHtml": "<p>...</p>" }
+// PUT /api/settings/info   { "titulo": "...", "contenidoHtml": "<p>...</p>" }
 router.put(
   '/info',
   requireAdmin,
@@ -114,6 +126,31 @@ router.put(
       detalle: { titulo: d.titulo, caracteres: html.length },
     });
     res.json({ info: { titulo: d.titulo, contenidoHtml: html, actualizadoEn: ahora } });
+  })
+);
+
+// PUT /api/settings/disclaimer-viaticos   { "texto": "..." }  (vacío = modelo por defecto)
+router.put(
+  '/disclaimer-viaticos',
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const { texto } = parse(disclaimerSchema, req.body);
+    const tenantId = req.user.tenantId;
+
+    const { error } = await supabase
+      .from('tenant_settings')
+      .upsert({ tenant_id: tenantId, disclaimer_viaticos: texto || null }, { onConflict: 'tenant_id' });
+    if (error) throw error;
+
+    await audit(req, {
+      tenantId,
+      userId: req.user.id,
+      accion: 'DISCLAIMER_VIATICOS_ACTUALIZADO',
+      detalle: { caracteres: texto.length, restaurado: texto === '' },
+    });
+
+    const d = await obtenerDisclaimer(tenantId);
+    res.json({ disclaimerViaticos: d.texto, disclaimerPersonalizado: d.personalizado });
   })
 );
 

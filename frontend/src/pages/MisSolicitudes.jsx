@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { api } from '../api/client';
+import { api, descargar } from '../api/client';
 import EstadoTag from '../components/EstadoTag';
 import Spinner from '../components/Spinner';
 import { cop, fechaHora } from '../utils';
@@ -25,7 +25,8 @@ export default function MisSolicitudes() {
     }
   }, [vista, estado]);
 
-  const descargar = async (id) => {
+  // Antes se llamaba "descargar"; se renombró para no tapar la función importada
+  const verSoporte = async (id) => {
     try {
       const r = await api(`/legalizations/${id}/file`);
       window.open(r.url, '_blank', 'noopener,noreferrer');
@@ -33,6 +34,9 @@ export default function MisSolicitudes() {
       setError(e.message);
     }
   };
+
+  const bajarPdf = (id) =>
+    descargar(`/viaticos/${id}/pdf`, `confirmacion_viaticos_${id.slice(0, 8)}.pdf`).catch((e) => setError(e.message));
 
   return (
     <div className="space-y-6">
@@ -91,7 +95,7 @@ export default function MisSolicitudes() {
                   </td>
                   <td>
                     {l.tieneArchivo && (
-                      <button onClick={() => descargar(l.id)} className="btn-link text-sm">Ver soporte</button>
+                      <button onClick={() => verSoporte(l.id)} className="btn-link text-sm">Ver soporte</button>
                     )}
                   </td>
                 </tr>
@@ -125,6 +129,11 @@ export default function MisSolicitudes() {
               </ul>
               {v.motivoRechazo && (
                 <div className="alert-error"><p><strong>Motivo del rechazo:</strong> {v.motivoRechazo}</p></div>
+              )}
+              {v.aceptadoEn && (
+                <button onClick={() => bajarPdf(v.id)} className="btn-secondary btn-sm">
+                  Descargar confirmación (PDF)
+                </button>
               )}
             </article>
           ))}

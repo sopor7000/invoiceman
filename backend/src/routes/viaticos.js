@@ -4,8 +4,10 @@ const { z } = require('zod');
 const supabase = require('../utils/supabase');
 const audit = require('../utils/audit');
 const { parse } = require('../utils/validate');
+const { obtenerDisclaimer } = require('../utils/disclaimer');
+const { generarPdfViatico } = require('../utils/pdf');
 const { HttpError, asyncHandler } = require('../utils/errors');
-const { requireAuth, requireTenant, requireApprover } = require('../middleware/auth');
+const { requireAuth, requireTenant, requireApprover, requireAdmin } = require('../middleware/auth');
 
 const router = express.Router();
 router.use(requireAuth(), requireTenant);
@@ -14,6 +16,8 @@ const uuid = z.string().uuid('Identificador inválido');
 
 const crearSchema = z.object({
   observacion: z.string().trim().max(500).optional(),
+  // Texto exacto que el usuario vio y aceptó
+  disclaimerTexto: z.string().min(1, 'Debes aceptar las condiciones').max(6000),
   items: z
     .array(
       z.object({
@@ -36,14 +40,21 @@ const listSchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(25),
 });
 
+const confirmSchema = z.object({
+  usuarioId: uuid.optional(),
+  page: z.coerce.number().int().min(1).default(1),
+  limit: z.coerce.number().int().min(1).max(100).default(15),
+});
+
 const rechazoSchema = z.object({
   motivo: z.string().trim().min(5, 'Indica el motivo del rechazo (mínimo 5 caracteres)').max(500),
 });
 
 const COLS =
-  'id, user_id, total, observacion, estado, motivo_rechazo, revisado_por, revisado_en, created_at';
+  'id, user_id, total, observacion, estado, motivo_rechazo, revisado_por, revisado_en, created_at, disclaimer_aceptado_en';
 
 const cop = (n) => `$${Number(n).toLocaleString('es-CO', { maximumFractionDigits: 2 })}`;
+const limpiar = (q) => Object.fromEntries(Object.entries(q).filter(([, v]) => v !== ''));
 
 // El superadmin entra a administrar: no pertenece a la compañía y no puede crear solicitudes
 const noSuperadmin = (req, _res, next) =>
@@ -113,6 +124,7 @@ async function enriquecer(tenantId, rows, { conSolicitante = false } = {}) {
       motivoRechazo: r.motivo_rechazo,
       revisadoEn: r.revisado_en,
       creadaEn: r.created_at,
+      aceptadoEn: r.disclaimer_aceptado_en,
       items: porSolicitud.get(r.id) ?? [],
       ...(conSolicitante && {
         usuario: u ? { id: u.id, nombre: u.nombre, documento: u.numero_doc, email: u.email } : null,
@@ -128,11 +140,22 @@ router.post(
   asyncHandler(async (req, res) => {
     const d = parse(crearSchema, req.body);
 
+    // El texto aceptado debe ser el vigente
+    const vigente = (await obtenerDisclaimer(req.user.tenantId)).texto;
+    if (d.disclaimerTexto.trim() !== vigente.trim()) {
+      throw new HttpError(
+        409,
+        'Las condiciones fueron actualizadas. Revisa la nueva versión y vuelve a aceptarla.',
+        'DISCLAIMER_CAMBIO'
+      );
+    }
+
     const { data, error } = await supabase.rpc('crear_viatico', {
       p_tenant: req.user.tenantId,
       p_user: req.user.id,
       p_items: d.items.map((i) => ({ concept_id: i.conceptId, valor: i.valor })),
       p_observacion: d.observacion || null,
+      p_disclaimer: vigente,
     });
 
     if (error) {
@@ -165,7 +188,7 @@ router.post(
       tenantId: req.user.tenantId,
       userId: req.user.id,
       accion: 'VIATICO_CREADO',
-      detalle: { id: data.id, total: data.total },
+      detalle: { id: data.id, total: data.total, disclaimerAceptado: true },
     });
 
     const { data: fila, error: e2 } = await supabase
@@ -183,7 +206,7 @@ router.post(
 router.get(
   '/mine',
   asyncHandler(async (req, res) => {
-    const f = parse(listSchema, Object.fromEntries(Object.entries(req.query).filter(([, v]) => v !== '')));
+    const f = parse(listSchema, limpiar(req.query));
     let q = supabase
       .from('viatico_requests')
       .select(COLS, { count: 'exact' })
@@ -204,7 +227,7 @@ router.get(
   '/review',
   requireApprover,
   asyncHandler(async (req, res) => {
-    const f = parse(listSchema, Object.fromEntries(Object.entries(req.query).filter(([, v]) => v !== '')));
+    const f = parse(listSchema, limpiar(req.query));
     let q = supabase
       .from('viatico_requests')
       .select(COLS, { count: 'exact' })
@@ -220,6 +243,112 @@ router.get(
       page: f.page,
       limit: f.limit,
       items: await enriquecer(req.user.tenantId, data, { conSolicitante: true }),
+    });
+  })
+);
+
+// ---------- GET /api/viaticos/confirmations ----------  (administrador)
+// Solicitudes con aceptación del disclaimer registrada, para descargar su PDF
+router.get(
+  '/confirmations',
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const f = parse(confirmSchema, limpiar(req.query));
+    let q = supabase
+      .from('viatico_requests')
+      .select('id, user_id, total, estado, created_at, disclaimer_aceptado_en', { count: 'exact' })
+      .eq('tenant_id', req.user.tenantId)
+      .not('disclaimer_aceptado_en', 'is', null)
+      .order('disclaimer_aceptado_en', { ascending: false })
+      .range((f.page - 1) * f.limit, f.page * f.limit - 1);
+    if (f.usuarioId) q = q.eq('user_id', f.usuarioId);
+
+    const { data, count, error } = await q;
+    if (error) throw error;
+
+    const userIds = [...new Set(data.map((r) => r.user_id))];
+    const usuarios = new Map();
+    if (userIds.length) {
+      const { data: us, error: e2 } = await supabase
+        .from('users')
+        .select('id, nombre, tipo_doc, numero_doc')
+        .eq('tenant_id', req.user.tenantId)
+        .in('id', userIds);
+      if (e2) throw e2;
+      us.forEach((u) => usuarios.set(u.id, u));
+    }
+
+    res.json({
+      total: count,
+      page: f.page,
+      limit: f.limit,
+      items: data.map((r) => {
+        const u = usuarios.get(r.user_id);
+        return {
+          id: r.id,
+          usuario: u ? { nombre: u.nombre, documento: `${u.tipo_doc} ${u.numero_doc}` } : null,
+          total: Number(r.total),
+          estado: r.estado,
+          creadaEn: r.created_at,
+          aceptadoEn: r.disclaimer_aceptado_en,
+        };
+      }),
+    });
+  })
+);
+
+// ---------- GET /api/viaticos/:id/pdf ----------
+// Lo descarga el dueño de la solicitud o un administrador
+router.get(
+  '/:id/pdf',
+  asyncHandler(async (req, res) => {
+    const id = parse(uuid, req.params.id);
+    const tenantId = req.user.tenantId;
+
+    const { data: v, error } = await supabase
+      .from('viatico_requests')
+      .select(`${COLS}, disclaimer_texto`)
+      .eq('id', id)
+      .eq('tenant_id', tenantId)
+      .maybeSingle();
+    if (error) throw error;
+    if (!v) throw new HttpError(404, 'Solicitud no encontrada', 'NO_ENCONTRADA');
+    if (v.user_id !== req.user.id && !req.user.isAdmin) {
+      throw new HttpError(403, 'No tienes acceso a este documento', 'FORBIDDEN');
+    }
+    if (!v.disclaimer_aceptado_en || !v.disclaimer_texto) {
+      throw new HttpError(
+        409,
+        'Esta solicitud no tiene una aceptación de condiciones registrada (se creó antes de activar esta función).',
+        'SIN_ACEPTACION'
+      );
+    }
+
+    const { data: u, error: e2 } = await supabase
+      .from('users')
+      .select('nombre, tipo_doc, numero_doc, email')
+      .eq('id', v.user_id)
+      .eq('tenant_id', tenantId)
+      .single();
+    if (e2) throw e2;
+
+    const [det] = await enriquecer(tenantId, [v]);
+
+    await audit(req, { tenantId, userId: req.user.id, accion: 'VIATICO_PDF_DESCARGADO', detalle: { id } });
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="confirmacion_viaticos_${id.slice(0, 8)}.pdf"`);
+    generarPdfViatico(res, {
+      id,
+      usuario: u,
+      compania: { nombre: req.user.tenant.nombre, nit: req.user.tenant.nit },
+      estado: v.estado,
+      observacion: v.observacion,
+      creadaEn: v.created_at,
+      aceptadoEn: v.disclaimer_aceptado_en,
+      total: Number(v.total),
+      items: det.items,
+      disclaimer: v.disclaimer_texto,
     });
   })
 );

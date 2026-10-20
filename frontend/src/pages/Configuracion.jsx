@@ -5,12 +5,14 @@ import Usuarios from './config/Usuarios';
 import Informacion from './config/Informacion';
 import BaseDian from './config/BaseDian';
 import AyudaConfig from './config/AyudaConfig';
+import DisclaimerViaticos from './config/DisclaimerViaticos';
 
 const TABS = [
   { id: 'usuarios', nombre: 'Usuarios', vista: () => <Usuarios /> },
   { id: 'cfact', nombre: 'Conceptos de facturas', vista: () => <Conceptos tipo="FACTURA" /> },
   { id: 'cvia', nombre: 'Conceptos de viáticos', vista: () => <Conceptos tipo="VIATICO" /> },
   { id: 'tope', nombre: 'Tope de viáticos', vista: () => <TopeViaticos /> },
+  { id: 'disc', nombre: 'Disclaimer de viáticos', vista: () => <DisclaimerViaticos /> }, 
   { id: 'info', nombre: 'Información', vista: () => <Informacion /> },
   { id: 'dian', nombre: 'Base DIAN', vista: () => <BaseDian /> },
   { id: 'ayuda', nombre: 'Ayuda', vista: () => <AyudaConfig /> },
