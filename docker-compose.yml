@@ -1,0 +1,17 @@
+name: invoiceman
+services:
+  app:
+    build: .
+    env_file: ./backend/.env
+    environment:
+      NODE_ENV: production
+      PORT: 4001
+    ports:
+      - "127.0.0.1:4001:4001"
+    restart: unless-stopped
+    mem_limit: 768m
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:4001/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
