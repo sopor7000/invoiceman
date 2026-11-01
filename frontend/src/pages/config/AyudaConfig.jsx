@@ -52,11 +52,27 @@ export default function AyudaConfig() {
     }
   };
 
+  const eliminar = async (c) => {
+    const aviso = c.esArchivo
+      ? `¿Eliminar "${c.titulo}"?\n\nSe borrará también el archivo y no se puede deshacer.`
+      : `¿Eliminar "${c.titulo}"?\n\nNo se puede deshacer.`;
+    if (!window.confirm(aviso)) return;
+    setError(''); setMsg('');
+    try {
+      await api(`/help/${c.id}`, { method: 'DELETE' });
+      setMsg('Contenido eliminado.');
+      cargar();
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
   return (
     <div className="space-y-8">
       <p className="text-muted">
         Este contenido se muestra al usuario cuando el CUFE de su factura no se encuentra en la base de la DIAN.
         Sube un video (MP4/WEBM) o una presentación (PDF/PowerPoint) de hasta 50 MB, o pega un enlace (YouTube, Drive, etc.).
+        Si ya no usas un contenido, elimínalo para liberar espacio.
       </p>
       {error && <div role="alert" className="alert-error"><p>{error}</p></div>}
       {msg && <div className="alert-success"><p>{msg}</p></div>}
@@ -105,7 +121,7 @@ export default function AyudaConfig() {
         {lista === null ? <Spinner /> : (
           <div className="table-wrap">
             <table className="table">
-              <thead><tr><th>Tipo</th><th>Título</th><th>Origen</th><th>Activo</th></tr></thead>
+              <thead><tr><th>Tipo</th><th>Título</th><th>Origen</th><th>Activo</th><th /></tr></thead>
               <tbody>
                 {lista.map((c) => (
                   <tr key={c.id} className={c.activo ? '' : 'opacity-60'}>
@@ -114,9 +130,10 @@ export default function AyudaConfig() {
                     <td>{c.url ? <a href={c.url} target="_blank" rel="noopener noreferrer" className="btn-link text-sm">{c.esArchivo ? 'Ver archivo' : 'Abrir enlace'}</a> : '—'}</td>
                     <td><input type="checkbox" className="h-5 w-5 accent-primary" checked={c.activo}
                       aria-label={`Activo: ${c.titulo}`} onChange={() => alternar(c)} /></td>
+                    <td><button onClick={() => eliminar(c)} className="btn-danger btn-sm">Eliminar</button></td>
                   </tr>
                 ))}
-                {lista.length === 0 && <tr><td colSpan={4} className="text-muted">Aún no hay contenido.</td></tr>}
+                {lista.length === 0 && <tr><td colSpan={5} className="text-muted">Aún no hay contenido.</td></tr>}
               </tbody>
             </table>
           </div>

@@ -174,4 +174,46 @@ router.patch(
   })
 );
 
+// ---------- DELETE /api/help/:id ----------
+// Borra el registro y, si tenía archivo, también lo elimina de Storage para liberar espacio
+router.delete(
+  '/:id',
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const id = parse(idSchema, req.params.id);
+    const tenantId = req.user.tenantId;
+
+    const { data: c, error } = await supabase
+      .from('help_content')
+      .select('id, titulo, tipo, archivo_path')
+      .eq('id', id)
+      .eq('tenant_id', tenantId)
+      .maybeSingle();
+    if (error) throw error;
+    if (!c) throw new HttpError(404, 'Contenido no encontrado', 'NO_ENCONTRADO');
+
+    const { error: delErr } = await supabase
+      .from('help_content')
+      .delete()
+      .eq('id', id)
+      .eq('tenant_id', tenantId);
+    if (delErr) throw delErr;
+
+    // Si falla el borrado del archivo no se deshace lo anterior: solo se deja constancia
+    let archivoEliminado = false;
+    if (c.archivo_path) {
+      const { error: stErr } = await supabase.storage.from(BUCKET).remove([c.archivo_path]);
+      if (stErr) console.error('No se pudo borrar el archivo de ayuda:', stErr.message);
+      else archivoEliminado = true;
+    }
+
+    await audit(req, {
+      tenantId,
+      userId: req.user.id,
+      accion: 'AYUDA_ELIMINADA',
+      detalle: { id, titulo: c.titulo, tipo: c.tipo, archivoEliminado },
+    });
+    res.json({ ok: true, archivoEliminado });
+  })
+);
 module.exports = router;
