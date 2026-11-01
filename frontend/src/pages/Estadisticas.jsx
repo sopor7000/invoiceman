@@ -4,7 +4,15 @@ import {
 } from 'recharts';
 import { api, descargar } from '../api/client';
 import Spinner from '../components/Spinner';
-import { cop } from '../utils';
+
+// Pesos colombianos con 2 decimales: $ 1.426.000,50
+const cop2 = (v) =>
+  new Intl.NumberFormat('es-CO', {
+    style: 'currency',
+    currency: 'COP',
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(Number(v) || 0);
 
 const ETIQ_TIPO = { ELECTRONICA: 'Electrónica', MANUAL: 'Manual', EXTRANJERA: 'Extranjera' };
 // Azul, rojo y grises de la paleta
@@ -12,11 +20,11 @@ const COLORES = ['#0a3161', '#b31942', '#52606d', '#1d5199', '#d12a56', '#7b8794
 const MESES = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
 const etiquetaMes = (m) => `${MESES[Number(m.slice(5, 7)) - 1]} ${m.slice(2, 4)}`;
 
-function Kpi({ titulo, valor, color }) {
+function Kpi({ titulo, valor, color, className = '' }) {
   return (
-    <div className="card card-hover">
+    <div className={`card card-hover min-w-0 ${className}`}>
       <p className="text-sm font-bold uppercase tracking-wide text-muted">{titulo}</p>
-      <p className="mt-1 text-3xl font-extrabold" style={{ color }}>{valor}</p>
+      <p className="mt-1 text-3xl font-extrabold tabular-nums break-words" style={{ color }}>{valor}</p>
     </div>
   );
 }
@@ -99,12 +107,12 @@ export default function Estadisticas() {
 
       {d === null ? <Spinner /> : d === false ? null : (
         <>
-          <section className="grid gap-5 sm:grid-cols-2 lg:grid-cols-5">
+          <section className="grid gap-5 sm:grid-cols-2 lg:grid-cols-6">
             <Kpi titulo="Total" valor={d.totales.total} color="#0a3161" />
             <Kpi titulo="Aprobadas" valor={d.totales.aprobadas} color="#2e7d4f" />
             <Kpi titulo="Rechazadas" valor={d.totales.rechazadas} color="#b31942" />
             <Kpi titulo="Pendientes" valor={d.totales.pendientes} color="#b45309" />
-            <Kpi titulo="Valor aprobado" valor={cop(d.totales.valorAprobado)} color="#0a3161" />
+            <Kpi titulo="Valor aprobado" valor={cop2(d.totales.valorAprobado)} color="#0a3161" className="sm:col-span-2" />
           </section>
 
           <section className="grid gap-6 lg:grid-cols-2">
@@ -164,7 +172,7 @@ export default function Estadisticas() {
                     <CartesianGrid strokeDasharray="3 3" stroke="#e4e7eb" />
                     <XAxis dataKey="mes" />
                     <YAxis allowDecimals={false} tickFormatter={fmtEje} />
-                    <Tooltip formatter={(v) => (metrica === 'valores' ? cop(v) : v)} />
+                    <Tooltip formatter={(v) => (metrica === 'valores' ? cop2(v) : v)} />
                     <Legend />
                     {d.tendencia.series.map((s, i) => (
                       <Line key={s.concepto} type="monotone" dataKey={s.concepto} stroke={COLORES[i % COLORES.length]}
