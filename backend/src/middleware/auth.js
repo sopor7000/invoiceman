@@ -4,7 +4,7 @@ const { HttpError, asyncHandler } = require('../utils/errors');
 
 const USER_COLUMNS =
   'id, tenant_id, tipo_doc, numero_doc, nombre, email, is_super_admin, is_admin, ' +
-  'is_approver, must_change_password, acepto_datos_en, activo';
+  'is_approver, must_change_password, acepto_datos_en, activo, pwd_changed_at';
 
 /**
  * Exige sesión válida y deja el usuario en req.user.
@@ -32,6 +32,11 @@ function requireAuth(options = {}) {
       .maybeSingle();
     if (error) throw error;
     if (!u || !u.activo) throw new HttpError(401, 'Usuario no disponible', 'USER_INACTIVE');
+
+    // Tokens emitidos antes de restablecer la contraseña ya no sirven
+    if (u.pwd_changed_at && payload.iat < Math.floor(new Date(u.pwd_changed_at).getTime() / 1000)) {
+      throw new HttpError(401, 'Tu sesión se cerró porque la contraseña cambió. Ingresa de nuevo.', 'SESSION_REVOKED');
+    }
 
     // Compañía efectiva
     let tenant = null;

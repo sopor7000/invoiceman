@@ -1,4 +1,5 @@
 const KEY = 'legalizacion_token';
+export const AVISO_LOGIN = 'aviso-login';
 
 export const getToken = () => sessionStorage.getItem(KEY);
 export const setToken = (t) => sessionStorage.setItem(KEY, t);
@@ -40,7 +41,11 @@ export async function api(path, { method = 'GET', body, form } = {}) {
 
   if (!res.ok) {
     // 401 = sesión inválida. Excepto en el login, donde significa clave incorrecta.
-    if (res.status === 401 && path !== '/auth/login') onUnauthorized();
+    if (res.status === 401 && path !== '/auth/login') {
+      // La contraseña cambió: el login muestra el motivo al llegar
+      if (data?.code === 'SESSION_REVOKED') sessionStorage.setItem(AVISO_LOGIN, data.error);
+      onUnauthorized();
+    }
     throw new ApiError(res.status, data?.error || 'Error inesperado', data?.code, data);
   }
   return data;

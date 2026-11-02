@@ -1,6 +1,7 @@
-import { useState } from 'react';
-import { Navigate, useLocation, useNavigate } from 'react-router-dom';
+import { useEffect, useState } from 'react';
+import { Link, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { AVISO_LOGIN } from '../api/client';
 import Banner from '../components/Banner';
 
 const BENEFICIOS = [
@@ -18,6 +19,12 @@ export default function Login() {
   const [mostrar, setMostrar] = useState(false);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  // Aviso dejado por el cliente cuando el servidor cerró la sesión (SESSION_REVOKED)
+  const [aviso] = useState(() => sessionStorage.getItem(AVISO_LOGIN) || '');
+
+  useEffect(() => {
+    if (aviso) sessionStorage.removeItem(AVISO_LOGIN);
+  }, [aviso]);
 
   if (user) return <Navigate to="/" replace />;
 
@@ -81,6 +88,12 @@ export default function Login() {
               <p className="text-muted">Ingresa con tu correo corporativo y tu contraseña.</p>
             </div>
 
+            {aviso && (
+              <div role="status" className="alert-info">
+                <p>{aviso}</p>
+              </div>
+            )}
+
             {error && (
               <div role="alert" className="alert-error">
                 <p className="alert-title">No pudimos iniciar tu sesión</p>
@@ -106,6 +119,10 @@ export default function Login() {
             <button disabled={busy} className="btn-primary w-full">
               {busy ? 'Ingresando…' : 'Ingresar'}
             </button>
+
+            <Link to="/recuperar" className="btn-link block text-center text-sm">
+              ¿Olvidaste tu contraseña?
+            </Link>
           </form>
         </main>
       </div>

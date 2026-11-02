@@ -362,7 +362,11 @@ router.post(
 
     const { data, error } = await supabase
       .from('users')
-      .update({ password_hash: await bcrypt.hash(passwordTemporal, 10), must_change_password: true })
+      .update({
+        password_hash: await bcrypt.hash(passwordTemporal, 10),
+        must_change_password: true,
+        pwd_changed_at: new Date().toISOString(),
+      })
       .eq('id', id)
       .eq('tenant_id', req.user.tenantId)
       .select('id, email')

@@ -1,3 +1,4 @@
+const crypto = require('crypto');
 const express = require('express');
 const bcrypt = require('bcryptjs');
 const rateLimit = require('express-rate-limit');
@@ -9,6 +10,7 @@ const { signToken } = require('../utils/jwt');
 const { parse } = require('../utils/validate');
 const { HttpError, asyncHandler } = require('../utils/errors');
 const { requireAuth } = require('../middleware/auth');
+const { enviarCorreo, plantillaRecuperacion } = require('../utils/mailer');
 
 const router = express.Router();
 
@@ -40,6 +42,33 @@ const changeSchema = z.object({
   actual: z.string().min(1, 'Ingresa tu contraseña actual'),
   nueva: passwordSchema,
 });
+
+const forgotSchema = z.object({
+  email: z.string().trim().toLowerCase().email('Correo inválido'),
+});
+
+const resetSchema = z.object({
+  token: z.string().regex(/^[a-f0-9]{64}$/, 'El enlace no es válido'),
+  nueva: passwordSchema,
+});
+
+const forgotLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  limit: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Demasiadas solicitudes. Intenta de nuevo en una hora.', code: 'RATE_LIMIT' },
+});
+
+const resetLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Demasiados intentos. Intenta de nuevo en 15 minutos.', code: 'RATE_LIMIT' },
+});
+
+const sha256 = (s) => crypto.createHash('sha256').update(s).digest('hex');
 
 // Datos que se devuelven al frontend (nunca el hash)
 function publicUser(u) {
@@ -91,6 +120,85 @@ router.post(
     );
 
     res.json({ token, user: publicUser(req.user) });
+  })
+);
+
+// POST /api/auth/forgot  (pública; responde siempre lo mismo, exista o no el correo)
+router.post(
+  '/forgot',
+  forgotLimiter,
+  asyncHandler(async (req, res) => {
+    const { email } = parse(forgotSchema, req.body);
+    if (!process.env.APP_URL) {
+      throw new HttpError(503, 'La recuperación de contraseña no está disponible', 'SIN_APP_URL');
+    }
+    // Se responde antes de consultar nada: el tiempo de respuesta no debe revelar si el correo existe
+    res.json({
+      ok: true,
+      mensaje: 'Si el correo está registrado, recibirás un enlace para restablecer tu contraseña. Revisa también la carpeta de spam.',
+    });
+
+    procesarRecuperacion(req, email).catch((e) =>
+      console.error('Error procesando la recuperación de contraseña:', e.code || e.name)
+    );
+  })
+);
+
+// Busca al usuario, guarda el enlace y envía el correo (corre después de responder)
+async function procesarRecuperacion(req, email) {
+  const { data: u, error } = await supabase
+    .from('users')
+    .select('id, tenant_id, nombre, email, activo')
+    .eq('email', email)
+    .maybeSingle();
+  if (error) throw error;
+  if (!u || !u.activo) return;
+
+  // Un correo cada 2 minutos por usuario
+  const { data: reciente, error: recErr } = await supabase
+    .from('password_resets')
+    .select('id')
+    .eq('user_id', u.id)
+    .gt('created_at', new Date(Date.now() - 2 * 60 * 1000).toISOString())
+    .limit(1);
+  if (recErr) throw recErr;
+  if (reciente.length) return;
+
+  const minutos = Number(process.env.RESET_MINUTOS) || 30;
+  const token = crypto.randomBytes(32).toString('hex');
+  const { error: insErr } = await supabase.from('password_resets').insert({
+    user_id: u.id,
+    token_hash: sha256(token),
+    expires_at: new Date(Date.now() + minutos * 60 * 1000).toISOString(),
+    ip: req.ip,
+  });
+  if (insErr) throw insErr;
+
+  const enlace = `${process.env.APP_URL.replace(/\/+$/, '')}/restablecer?token=${token}`;
+  const { asunto, texto, html } = plantillaRecuperacion({ nombre: u.nombre, enlace, minutos });
+  enviarCorreo({ para: u.email, asunto, texto, html }).catch((e) =>
+    console.error('Error enviando correo de recuperación:', e.code || e.name)
+  );
+
+  await audit(req, { tenantId: u.tenant_id, userId: u.id, accion: 'RECUPERACION_SOLICITADA' });
+}
+
+// POST /api/auth/reset  (pública; consume el enlace y cambia la clave)
+router.post(
+  '/reset',
+  resetLimiter,
+  asyncHandler(async (req, res) => {
+    const { token, nueva } = parse(resetSchema, req.body);
+
+    const hash = await bcrypt.hash(nueva, 10);
+    const { data, error } = await supabase.rpc('consumir_reset', { p_hash: sha256(token), p_password_hash: hash });
+    if (error) throw error;
+    if (data?.resultado !== 'OK') {
+      throw new HttpError(400, 'El enlace no es válido o ya venció. Solicita uno nuevo.', 'ENLACE_INVALIDO');
+    }
+
+    await audit(req, { tenantId: data.tenant_id, userId: data.user_id, accion: 'CLAVE_RESTABLECIDA' });
+    res.json({ ok: true });
   })
 );
 

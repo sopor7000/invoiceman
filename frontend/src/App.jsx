@@ -4,6 +4,8 @@ import Protected from './components/Protected';
 import Home from './pages/Home';
 import Login from './pages/Login';
 import Onboarding from './pages/Onboarding';
+import Recuperar from './pages/Recuperar';
+import Restablecer from './pages/Restablecer';
 import LegalizarManual from './pages/LegalizarManual';
 import LegalizarExtranjera from './pages/LegalizarExtranjera';
 import LegalizarElectronica from './pages/LegalizarElectronica';
@@ -28,6 +30,8 @@ export default function App() {
   return (
     <Routes>
       <Route path="/login" element={<Login />} />
+      <Route path="/recuperar" element={<Recuperar />} />
+      <Route path="/restablecer" element={<Restablecer />} />
       <Route path="/bienvenida" element={<Onboarding />} />
 
       <Route element={<Protected><Layout /></Protected>}>
