@@ -1,0 +1,36 @@
+{
+  "permissions": {
+    "deny": [
+      "Read(./.env)",
+      "Read(./.env.*)",
+      "Read(./backend/.env)",
+      "Read(./backend/.env.*)",
+      "Read(./frontend/.env)",
+      "Read(./frontend/.env.*)",
+      "Read(./backend/scripts/login.ps1)",
+      "Edit(./.env)",
+      "Edit(./.env.*)",
+      "Edit(./backend/.env)",
+      "Edit(./backend/.env.*)",
+      "Edit(./frontend/.env)",
+      "Edit(./frontend/.env.*)",
+      "Bash(ssh *)",
+      "Bash(scp *)",
+      "Bash(curl *)",
+      "Bash(rm -rf *)",
+      "Bash(npx supabase *)",
+      "Bash(supabase *)"
+    ],
+    "ask": [
+      "Bash(git push *)",
+      "Bash(git commit *)",
+      "Bash(npm install *)"
+    ],
+    "allow": [
+      "Bash(npm run build)",
+      "Bash(npm run dev)",
+      "Bash(git status)",
+      "Bash(git diff *)"
+    ]
+  }
+}
