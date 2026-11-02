@@ -16,6 +16,12 @@ App web multitenant para legalizar facturas y viáticos (Colombia). Responde sie
 - Rutas Express: `asyncHandler`, validación con zod vía `parse()`, errores con `HttpError`, y `audit()` para acciones sensibles.
 - Frontend: clases propias con `@utility` en `index.css` (Tailwind v4). Paleta azul marino, rojo y grises; reutiliza `btn-primary`, `card`, `field`, `alert-*`.
 - Los valores de dinero se guardan en COP. Las fechas se muestran en hora de Colombia.
+Aviso temporal: todavía no existe un proyecto de desarrollo. Mi backend/.env local apunta
+a la base de producción, que solo tiene datos de prueba. Por eso:
+- Nunca borres ni modifiques datos existentes. Solo crea datos de prueba con el prefijo "PRUEBA ".
+- No ejecutes scripts de siembra masiva ni pruebas de aislamiento (fases 4 y 5.3).
+- Todo SQL va en database/ y lo ejecuto yo a mano; tú no lo ejecutas.
+Este aviso se elimina cuando exista el proyecto invoiceman-dev.
 
 ## Antes de dar algo por terminado
 - `npm run build` en `frontend` debe pasar sin errores.
