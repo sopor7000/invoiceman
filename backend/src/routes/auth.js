@@ -87,6 +87,7 @@ function publicUser(u) {
       cambiarClave: u.mustChangePassword,
       aceptarDatos: !u.aceptoDatos,
     },
+    plan: u.plan,
   };
 }
 

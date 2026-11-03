@@ -1,10 +1,17 @@
 const supabase = require('../utils/supabase');
 const { verifyToken } = require('../utils/jwt');
 const { HttpError, asyncHandler } = require('../utils/errors');
+const { estadoPlan } = require('../utils/plan');
 
 const USER_COLUMNS =
   'id, tenant_id, tipo_doc, numero_doc, nombre, email, is_super_admin, is_admin, ' +
   'is_approver, must_change_password, acepto_datos_en, activo, pwd_changed_at';
+
+const TENANT_COLS = 'id, nombre, nit, activo, validar_nit_receptor, plan_vence_en';
+
+// Con el plan vencido, estas rutas siguen aceptando escrituras (sesión, plan, pagos y avisos)
+const RUTAS_SIN_BLOQUEO_PLAN = ['/api/auth', '/api/plan', '/api/billing', '/api/notifications'];
+const METODOS_LECTURA = ['GET', 'HEAD', 'OPTIONS'];
 
 /**
  * Exige sesión válida y deja el usuario en req.user.
@@ -44,7 +51,7 @@ function requireAuth(options = {}) {
       if (payload.ten) {
         const { data } = await supabase
           .from('tenants')
-          .select('id, nombre, nit, activo, validar_nit_receptor')
+          .select(TENANT_COLS)
           .eq('id', payload.ten)
           .maybeSingle();
         if (!data || !data.activo) {
@@ -55,7 +62,7 @@ function requireAuth(options = {}) {
     } else {
       const { data } = await supabase
         .from('tenants')
-        .select('id, nombre, nit, activo, validar_nit_receptor')
+        .select(TENANT_COLS)
         .eq('id', u.tenant_id)
         .maybeSingle();
       if (!data || !data.activo) {
@@ -81,7 +88,22 @@ function requireAuth(options = {}) {
       isApprover: impersonating ? true : u.is_approver,
       mustChangePassword: u.must_change_password,
       aceptoDatos: !!u.acepto_datos_en,
+      plan: tenant ? estadoPlan(tenant.plan_vence_en) : null,
     };
+
+    // Plan vencido (pasada la gracia): solo consulta y descarga
+    if (
+      req.user.plan?.estado === 'VENCIDO' &&
+      !req.user.isSuperAdmin &&
+      !METODOS_LECTURA.includes(req.method) &&
+      !RUTAS_SIN_BLOQUEO_PLAN.some((r) => req.originalUrl.startsWith(r))
+    ) {
+      throw new HttpError(
+        402,
+        'El plan de tu compañía está vencido. Solo puedes consultar y descargar información hasta que se renueve.',
+        'PLAN_VENCIDO'
+      );
+    }
 
     if (!options.allowPending) {
       if (req.user.mustChangePassword) {

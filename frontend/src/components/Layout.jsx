@@ -2,6 +2,21 @@ import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { api } from '../api/client';
 import Banner from './Banner';
+import { fechaCO } from '../utils';
+
+// Texto del aviso de vigencia según el estado del plan
+function avisoPlan(plan) {
+  if (plan?.estado === 'POR_VENCER') {
+    return `El plan de tu compañía vence el ${fechaCO(plan.venceEn)}.`;
+  }
+  if (plan?.estado === 'GRACIA') {
+    return `El plan de tu compañía venció el ${fechaCO(plan.venceEn)}. Tienes acceso completo durante ${plan.graciaDias} días de gracia.`;
+  }
+  if (plan?.estado === 'VENCIDO') {
+    return 'El plan de tu compañía está vencido: solo puedes consultar y descargar información.';
+  }
+  return null;
+}
 
 const link = ({ isActive }) =>
   `relative px-4 py-3 text-sm font-semibold text-white transition-colors duration-200 after:absolute after:inset-x-0 after:bottom-0 after:h-1 after:transition-transform ${
@@ -13,6 +28,7 @@ const link = ({ isActive }) =>
 export default function Layout() {
   const { user, logout, switchToken } = useAuth();
   const nav = useNavigate();
+  const aviso = avisoPlan(user.plan);
 
   const salirDeCompania = async () => {
     const r = await api('/super/exit', { method: 'POST' });
@@ -73,10 +89,22 @@ export default function Layout() {
               {user.isAdmin && <NavLink to="/inbox" className={link}>Bandeja</NavLink>}
               {user.isAdmin && <NavLink to="/estadisticas" className={link}>Estadísticas</NavLink>}
               {user.isAdmin && <NavLink to="/configuracion" className={link}>Configuración</NavLink>}
+              {user.isAdmin && <NavLink to="/plan" className={link}>Plan</NavLink>}
             </div>
           </nav>
         )}
       </div>
+
+      {aviso && (
+        <div className="mx-auto w-full max-w-6xl px-4 pt-6">
+          <div role="status" className={user.plan.estado === 'VENCIDO' ? 'alert-error' : 'alert-warning'}>
+            <p>
+              {aviso}{' '}
+              {user.isAdmin ? 'Renueva desde la sección Plan.' : 'Avisa a tu administrador para renovarlo.'}
+            </p>
+          </div>
+        </div>
+      )}
 
       <main id="contenido" className="mx-auto w-full max-w-6xl flex-1 px-4 py-8">
         <Outlet />

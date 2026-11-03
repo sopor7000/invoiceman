@@ -9,6 +9,7 @@ const audit = require('../utils/audit');
 const { parse } = require('../utils/validate');
 const { HttpError, asyncHandler } = require('../utils/errors');
 const { generarClaveTemporal } = require('../utils/password');
+const { errorLimite } = require('../utils/plan');
 const { requireAuth, requireTenant, requireAdmin } = require('../middleware/auth');
 
 const router = express.Router();
@@ -111,6 +112,8 @@ router.post(
       .single();
 
     if (error) {
+      const le = errorLimite(error);
+      if (le) throw le;
       if (error.code === '23505') throw new HttpError(409, mensajeDuplicado(error), 'DUPLICADO');
       throw error;
     }
@@ -267,6 +270,8 @@ router.post(
         )
         .select('id, email');
       if (error) {
+        const le = errorLimite(error);
+        if (le) throw le;
         if (error.code === '23505') {
           throw new HttpError(409, 'Se detectó un duplicado durante la carga. Intenta de nuevo.', 'DUPLICADO');
         }
@@ -339,6 +344,8 @@ router.patch(
       .select(COLS)
       .single();
     if (upErr) {
+      const le = errorLimite(upErr);
+      if (le) throw le;
       if (upErr.code === '23505') throw new HttpError(409, mensajeDuplicado(upErr), 'DUPLICADO');
       throw upErr;
     }

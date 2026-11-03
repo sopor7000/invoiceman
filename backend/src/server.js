@@ -61,6 +61,7 @@ app.use('/api/inbox', require('./routes/inbox'));
 app.use('/api/viaticos', require('./routes/viaticos'));
 app.use('/api/stats', require('./routes/stats'));
 app.use('/api/settings', require('./routes/settings'));
+app.use('/api/plan', require('./routes/plan'));
 
 // Rutas /api inexistentes
 app.use('/api', (_req, res) => res.status(404).json({ error: 'Ruta no encontrada' }));

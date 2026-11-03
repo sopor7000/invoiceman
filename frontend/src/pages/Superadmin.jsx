@@ -3,6 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import { api } from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import Spinner from '../components/Spinner';
+import UsoEmpresas from '../components/UsoEmpresas';
+import Cotizaciones from '../components/Cotizaciones';
 import { fechaHora } from '../utils';
 
 const TIPOS_DOC = ['CC', 'CE', 'PA', 'PEP', 'PPT', 'TI', 'NIT'];
@@ -166,6 +168,9 @@ export default function Superadmin() {
           </div>
         )}
       </section>
+
+      <UsoEmpresas />
+      <Cotizaciones />
     </div>
   );
 }

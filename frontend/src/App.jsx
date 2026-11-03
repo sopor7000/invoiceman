@@ -17,6 +17,8 @@ import Bandeja from './pages/Bandeja';
 import AprobarViaticos from './pages/AprobarViaticos';
 import Superadmin from './pages/Superadmin';
 import Estadisticas from './pages/Estadisticas';
+import Plan from './pages/Plan';
+import SuperEmpresa from './pages/SuperEmpresa';
 
 // Páginas que llegan en las siguientes entregas
 const Pronto = ({ titulo }) => (
@@ -46,7 +48,9 @@ export default function App() {
         <Route path="/inbox" element={<Protected roles={['admin']}><Bandeja /></Protected>} />
         <Route path="/estadisticas" element={<Protected roles={['admin']}><Estadisticas /></Protected>} />
         <Route path="/configuracion" element={<Protected roles={['admin']}><Configuracion /></Protected>} />
+        <Route path="/plan" element={<Protected roles={['admin']}><Plan /></Protected>} />
         <Route path="/super" element={<Protected roles={['super']}><Superadmin /></Protected>} />
+        <Route path="/super/empresa/:id" element={<Protected roles={['super']}><SuperEmpresa /></Protected>} />
       </Route>
 
       <Route path="*" element={<Login />} />
