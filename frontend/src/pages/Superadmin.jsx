@@ -5,6 +5,7 @@ import { useAuth } from '../context/AuthContext';
 import Spinner from '../components/Spinner';
 import UsoEmpresas from '../components/UsoEmpresas';
 import Cotizaciones from '../components/Cotizaciones';
+import FacturacionManual from '../components/FacturacionManual';
 import { fechaHora } from '../utils';
 
 const TIPOS_DOC = ['CC', 'CE', 'PA', 'PEP', 'PPT', 'TI', 'NIT'];
@@ -170,6 +171,7 @@ export default function Superadmin() {
       </section>
 
       <UsoEmpresas />
+      <FacturacionManual />
       <Cotizaciones />
     </div>
   );

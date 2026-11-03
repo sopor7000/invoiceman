@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { api } from '../api/client';
 import Spinner from '../components/Spinner';
+import PagosEmpresa from '../components/PagosEmpresa';
 import { ESTADO_PLAN, hoyCO } from '../utils';
 
 const TRAMOS = ['T1', 'T2', 'T3', 'T4', 'T5'];
@@ -43,7 +44,13 @@ export default function SuperEmpresa() {
   }, [id]);
   useEffect(() => { cargar(); }, [cargar]);
 
-  const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
+  // Tras registrar un pago: nueva vigencia en el panel y en el campo, sin perder lo no guardado del formulario
+  const pagoRegistrado = (venceEn) => {
+    setF((prev) => ({ ...prev, venceEn: fechaInput(venceEn) }));
+    api(`/super/tenants/${id}/plan`).then(setPlan).catch((e) => setError(e.message));
+  };
+
+  const set =(k) => (e) => setF({ ...f, [k]: e.target.value });
   const setPrecio = (c) => (e) => setF({ ...f, precios: { ...f.precios, [c]: e.target.value } });
 
   // Extiende desde la vigencia actual o, si ya venció, desde hoy
@@ -146,11 +153,16 @@ export default function SuperEmpresa() {
             <button type="button" className="btn-secondary" onClick={() => extender(1)}>+1 mes</button>
             <button type="button" className="btn-secondary" onClick={() => extender(12)}>+12 meses</button>
           </div>
-          <span className="hint">El plan vence al final del día indicado, en hora de Colombia.</span>
+          <span className="hint">
+            El plan vence al final del día indicado, en hora de Colombia. Usa +1 mes y +12 meses solo para correcciones o
+            cortesías: los pagos reales se registran abajo y extienden la vigencia solos.
+          </span>
         </section>
 
         <button disabled={busy} className="btn-primary">{busy ? 'Guardando…' : 'Guardar'}</button>
       </form>
+
+      <PagosEmpresa id={id} plan={plan} onRegistrado={pagoRegistrado} />
     </div>
   );
 }

@@ -1,5 +1,6 @@
 const express = require('express');
 const bcrypt = require('bcryptjs');
+const ExcelJS = require('exceljs');
 const { z } = require('zod');
 
 const supabase = require('../utils/supabase');
@@ -381,6 +382,280 @@ router.patch(
     if (error) throw error;
     if (!data) throw new HttpError(404, 'Solicitud no encontrada', 'NO_ENCONTRADA');
     res.json({ cotizacion: { id: data.id, estado: data.estado, atendidaEn: data.atendida_en } });
+  })
+);
+
+// ============================================================
+//   Pagos y facturas manuales
+// ============================================================
+
+const PAGO_COLS =
+  'id, tenant_id, tier_codigo, meses, valor_base, valor_iva, metodo, referencia_pago, ' +
+  'factura_numero, factura_fecha, periodo_desde, periodo_hasta, notas, created_at';
+const FACTURA_DUPLICADA = 'Ese número de factura ya está registrado en otro pago.';
+const MAX_PAGOS_EXPORT = 5000;
+
+const fechaSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Fecha inválida (AAAA-MM-DD)');
+const textoOpc = (max) => z.string().trim().max(max, `Máximo ${max} caracteres`).nullable().optional();
+
+const pagoSchema = z.object({
+  meses: z.number().int().min(1, 'Entre 1 y 36 meses').max(36, 'Entre 1 y 36 meses'),
+  valorBase: z.number().positive('El valor base debe ser mayor que 0'),
+  valorIva: z.number().min(0, 'El IVA no puede ser negativo'),
+  metodo: z.enum(['TRANSFERENCIA', 'WOMPI', 'EFECTIVO', 'OTRO'], { errorMap: () => ({ message: 'Método de pago inválido' }) }),
+  referenciaPago: textoOpc(120),
+  facturaNumero: textoOpc(60),
+  facturaFecha: fechaSchema.nullable().optional(),
+  notas: textoOpc(1000),
+});
+
+const pagoPatchSchema = z
+  .object({
+    facturaNumero: textoOpc(60),
+    facturaFecha: fechaSchema.nullable().optional(),
+    notas: textoOpc(1000),
+  })
+  .refine((d) => Object.keys(d).length > 0, 'No hay cambios para guardar');
+
+const exportPagosSchema = z.object({
+  desde: fechaSchema.optional(),
+  hasta: fechaSchema.optional(),
+});
+
+// Fecha AAAA-MM-DD en hora de Colombia
+const diaCO = (iso) => (iso ? new Date(new Date(iso).getTime() - 5 * 3600 * 1000).toISOString().slice(0, 10) : '');
+
+const fmtPago = (p) => ({
+  id: p.id,
+  tramo: p.tier_codigo,
+  meses: p.meses,
+  valorBase: Number(p.valor_base),
+  valorIva: Number(p.valor_iva),
+  total: Number(p.valor_base) + Number(p.valor_iva),
+  metodo: p.metodo,
+  referencia: p.referencia_pago,
+  facturaNumero: p.factura_numero,
+  facturaFecha: p.factura_fecha,
+  desde: p.periodo_desde,
+  hasta: p.periodo_hasta,
+  notas: p.notas,
+  creadoEn: p.created_at,
+});
+
+// Nombre y NIT de las compañías de una lista de pagos (consulta separada, sin embebidos)
+async function tenantsDePagos(pagos) {
+  const ids = [...new Set(pagos.map((p) => p.tenant_id))];
+  if (!ids.length) return new Map();
+  const { data, error } = await supabase.from('tenants').select('id, nombre, nit').in('id', ids);
+  if (error) throw error;
+  return new Map(data.map((t) => [t.id, t]));
+}
+
+// ---------- GET /api/super/tenants/:id/pagos ----------
+router.get(
+  '/tenants/:id/pagos',
+  asyncHandler(async (req, res) => {
+    const id = parse(idSchema, req.params.id);
+    const { data, error } = await supabase
+      .from('plan_payments')
+      .select(PAGO_COLS)
+      .eq('tenant_id', id)
+      .order('created_at', { ascending: false })
+      .limit(100);
+    if (error) throw error;
+    res.json({ pagos: data.map(fmtPago), ivaPct: Number(process.env.IVA_PCT) || 19 });
+  })
+);
+
+// ---------- POST /api/super/tenants/:id/pagos ----------
+router.post(
+  '/tenants/:id/pagos',
+  asyncHandler(async (req, res) => {
+    const id = parse(idSchema, req.params.id);
+    const d = parse(pagoSchema, req.body);
+    await buscarTenant(id);
+
+    const { data: r, error } = await supabase.rpc('registrar_pago_plan', {
+      p_tenant: id,
+      p_meses: d.meses,
+      p_valor_base: d.valorBase,
+      p_valor_iva: d.valorIva,
+      p_metodo: d.metodo,
+      p_referencia: d.referenciaPago ?? null,
+      p_factura: d.facturaNumero ?? null,
+      p_factura_fecha: d.facturaFecha ?? null,
+      p_notas: d.notas ?? null,
+      p_user: req.user.id,
+    });
+    if (error) throw error;
+    if (r?.resultado === 'FACTURA_DUPLICADA') throw new HttpError(409, FACTURA_DUPLICADA, 'FACTURA_DUPLICADA');
+    if (r?.resultado === 'SIN_PLAN') throw new HttpError(404, 'La compañía no tiene un plan asignado', 'SIN_PLAN');
+    if (r?.resultado !== 'OK') throw new HttpError(400, 'No se pudo registrar el pago', r?.resultado || 'PAGO_INVALIDO');
+
+    await audit(req, {
+      tenantId: id,
+      userId: req.user.id,
+      accion: 'SUPER_REGISTRA_PAGO',
+      detalle: {
+        pago: r.id,
+        meses: d.meses,
+        valorBase: d.valorBase,
+        valorIva: d.valorIva,
+        metodo: d.metodo,
+        factura: d.facturaNumero || null,
+        venceEn: r.venceEn,
+      },
+    });
+    res.status(201).json({ ok: true, venceEn: r.venceEn });
+  })
+);
+
+// ---------- PATCH /api/super/pagos/:pagoId ----------
+router.patch(
+  '/pagos/:pagoId',
+  asyncHandler(async (req, res) => {
+    const pagoId = parse(idSchema, req.params.pagoId);
+    const d = parse(pagoPatchSchema, req.body);
+
+    const cambios = {};
+    if (d.facturaNumero !== undefined) cambios.factura_numero = d.facturaNumero || null;
+    if (d.facturaFecha !== undefined) cambios.factura_fecha = d.facturaFecha || null;
+    if (d.notas !== undefined) cambios.notas = d.notas || null;
+
+    const { data, error } = await supabase
+      .from('plan_payments')
+      .update(cambios)
+      .eq('id', pagoId)
+      .select(PAGO_COLS)
+      .maybeSingle();
+    if (error) {
+      if (error.code === '23505') throw new HttpError(409, FACTURA_DUPLICADA, 'FACTURA_DUPLICADA');
+      throw error;
+    }
+    if (!data) throw new HttpError(404, 'Pago no encontrado', 'NO_ENCONTRADO');
+
+    await audit(req, {
+      tenantId: data.tenant_id,
+      userId: req.user.id,
+      accion: 'SUPER_EDITA_PAGO',
+      detalle: { pago: pagoId, cambios },
+    });
+    res.json({ pago: fmtPago(data) });
+  })
+);
+
+// ---------- GET /api/super/pagos/pendientes-factura ----------
+router.get(
+  '/pagos/pendientes-factura',
+  asyncHandler(async (_req, res) => {
+    const { data, error } = await supabase
+      .from('plan_payments')
+      .select(PAGO_COLS)
+      .is('factura_numero', null)
+      .order('created_at', { ascending: true })
+      .limit(200);
+    if (error) throw error;
+
+    const tenants = await tenantsDePagos(data);
+    res.json({
+      pagos: data.map((p) => ({
+        ...fmtPago(p),
+        tenantId: p.tenant_id,
+        empresa: tenants.get(p.tenant_id)?.nombre ?? null,
+        nit: tenants.get(p.tenant_id)?.nit ?? null,
+      })),
+    });
+  })
+);
+
+// ---------- GET /api/super/pagos/export?desde&hasta ----------
+router.get(
+  '/pagos/export',
+  asyncHandler(async (req, res) => {
+    const f = parse(
+      exportPagosSchema,
+      Object.fromEntries(Object.entries(req.query).filter(([, v]) => v !== '' && v !== undefined))
+    );
+
+    // Supabase devuelve máximo 1000 filas por consulta: se pagina hasta MAX_PAGOS_EXPORT
+    const pagos = [];
+    for (let desde = 0; ; desde += 1000) {
+      let q = supabase
+        .from('plan_payments')
+        .select(PAGO_COLS)
+        .order('created_at', { ascending: true })
+        .order('id', { ascending: true })
+        .range(desde, desde + 999);
+      if (f.desde) q = q.gte('created_at', `${f.desde}T00:00:00-05:00`);
+      if (f.hasta) q = q.lte('created_at', `${f.hasta}T23:59:59.999-05:00`);
+      const { data, error } = await q;
+      if (error) throw error;
+      pagos.push(...data);
+      if (pagos.length > MAX_PAGOS_EXPORT) {
+        throw new HttpError(413, `Hay más de ${MAX_PAGOS_EXPORT} pagos. Acota el rango de fechas.`, 'DEMASIADOS_REGISTROS');
+      }
+      if (data.length < 1000) break;
+    }
+    const tenants = await tenantsDePagos(pagos);
+
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet('Pagos');
+    ws.columns = [
+      { header: 'Fecha de registro', key: 'registro', width: 16 },
+      { header: 'Empresa', key: 'empresa', width: 32 },
+      { header: 'NIT', key: 'nit', width: 16 },
+      { header: 'Tramo', key: 'tramo', width: 8 },
+      { header: 'Meses', key: 'meses', width: 8 },
+      { header: 'Periodo desde', key: 'desde', width: 14 },
+      { header: 'Periodo hasta', key: 'hasta', width: 14 },
+      { header: 'Valor base', key: 'base', width: 16 },
+      { header: 'IVA', key: 'iva', width: 14 },
+      { header: 'Total', key: 'total', width: 16 },
+      { header: 'Método', key: 'metodo', width: 16 },
+      { header: 'Referencia de pago', key: 'referencia', width: 22 },
+      { header: 'N.º de factura', key: 'factura', width: 16 },
+      { header: 'Fecha de factura', key: 'facturaFecha', width: 16 },
+      { header: 'Notas', key: 'notas', width: 40 },
+    ];
+    ws.getRow(1).font = { bold: true };
+    ws.views = [{ state: 'frozen', ySplit: 1 }];
+    ['nit', 'referencia', 'factura'].forEach((k) => (ws.getColumn(k).numFmt = '@')); // texto
+    ['base', 'iva', 'total'].forEach((k) => (ws.getColumn(k).numFmt = '#,##0.00'));
+
+    for (const p of pagos) {
+      const t = tenants.get(p.tenant_id);
+      const v = fmtPago(p);
+      ws.addRow({
+        registro: diaCO(p.created_at),
+        empresa: t?.nombre ?? '',
+        nit: t?.nit ?? '',
+        tramo: v.tramo,
+        meses: v.meses,
+        desde: diaCO(v.desde),
+        hasta: diaCO(v.hasta),
+        base: v.valorBase,
+        iva: v.valorIva,
+        total: v.total,
+        metodo: v.metodo,
+        referencia: v.referencia ?? '',
+        factura: v.facturaNumero ?? '',
+        facturaFecha: v.facturaFecha ?? '',
+        notas: v.notas ?? '',
+      });
+    }
+    ws.autoFilter = { from: 'A1', to: 'O1' };
+
+    await audit(req, {
+      userId: req.user.id,
+      accion: 'SUPER_EXPORTA_PAGOS',
+      detalle: { filas: pagos.length, desde: f.desde ?? null, hasta: f.hasta ?? null },
+    });
+
+    const hoy = diaCO(new Date().toISOString());
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="pagos_${hoy}.xlsx"`);
+    await wb.xlsx.write(res);
+    res.end();
   })
 );
 
