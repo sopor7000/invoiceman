@@ -90,6 +90,7 @@ export default function Layout() {
               {user.isAdmin && <NavLink to="/estadisticas" className={link}>Estadísticas</NavLink>}
               {user.isAdmin && <NavLink to="/configuracion" className={link}>Configuración</NavLink>}
               {user.isAdmin && <NavLink to="/plan" className={link}>Plan</NavLink>}
+              {user.isAdmin && <NavLink to="/auditoria" className={link}>Auditoría</NavLink>}
             </div>
           </nav>
         )}
