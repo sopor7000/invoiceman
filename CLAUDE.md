@@ -29,7 +29,7 @@ App web multitenant para legalizar facturas y viáticos (Colombia). Responde sie
 | `001_recuperacion_clave.sql` | Recuperación de contraseña: `pwd_changed_at`, `password_resets`, `consumir_reset` | 2026-11-03 | 2026-11-03 |
 | `002_planes.sql` | Planes por tramo, límite de usuarios, vigencia y panel de uso | 2026-11-03 | 2026-11-03 |
 | `003_pagos_manuales.sql` | Registro de pagos y facturas manuales: `plan_payments`, `registrar_pago_plan` | 2026-11-03 | 2026-11-03 |
-| `004_indices_auditoria.sql` | Índice de auditoría por empresa y acción, y función `acciones_auditoria` | 2026-11-04 | pendiente |
+| `004_indices_auditoria.sql` | Índice de auditoría por empresa y acción, y función `acciones_auditoria` | 2026-11-04 | 2026-11-05 |
 
 - Cada vez que crees un archivo nuevo en `database/`, agrega su fila con "pendiente" en ambas columnas.
 - Nunca marques una migración como aplicada: eso lo confirmo yo.
