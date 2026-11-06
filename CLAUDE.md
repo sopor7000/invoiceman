@@ -21,6 +21,7 @@ App web multitenant para legalizar facturas y viáticos (Colombia). Responde sie
 - Existe el proyecto de Supabase `invoiceman-dev` y mi `backend/.env` local apunta ahí.
 - Las siembras, los scripts y las pruebas que escriben datos solo corren si `SUPABASE_URL` contiene `DEV_PROJECT_REF`, y además exigen su bandera (`ALLOW_SEED=1` o `ALLOW_TESTS=1`). Si no se cumple, deben negarse a ejecutarse.
 - Todo SQL va en `database/` y lo ejecuto yo a mano; tú no lo ejecutas.
+- Los buckets de Storage (`soportes`, `ayuda`) deben crearse a mano en `invoiceman-dev`, porque no vienen en el volcado del esquema.
 
 ## Migraciones de base de datos
 | Archivo | Descripción | Aplicada en desarrollo | Aplicada en producción |
